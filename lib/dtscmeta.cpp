@@ -1263,11 +1263,12 @@ namespace DTSC {
     if (meta.isMember("buffer_window")) {
       bufferWindow = meta["buffer_window"].asInt();
     }
-    for (JSON::ObjIter it = meta["tracks"].ObjBegin(); it != meta["tracks"].ObjEnd(); it++) {
-      if (it->second.isMember("trackid") && it->second["trackid"]) {
-        tracks[it->second["trackid"].asInt()] = readOnlyTrack(it->second);
+    meta["tracks"].forEachMember([&] (const std::string & name, JSON::Value & val) -> bool {
+      if (val.isMember("trackid") && val["trackid"]) {
+        tracks[val["trackid"].asInt()] = readOnlyTrack(val);
       }
-    }
+      return true;
+    });
     if (meta.isMember("moreheader")) {
       moreheader = meta["moreheader"].asInt();
     } else {
@@ -1384,11 +1385,12 @@ namespace DTSC {
     if (meta.isMember("buffer_window")) {
       bufferWindow = meta["buffer_window"].asInt();
     }
-    for (JSON::ObjIter it = meta["tracks"].ObjBegin(); it != meta["tracks"].ObjEnd(); it++) {
-      if (it->second["trackid"].asInt()) {
-        tracks[it->second["trackid"].asInt()] = Track(it->second);
+    meta["tracks"].forEachMember([&] (const std::string & name, JSON::Value & val) -> bool {
+      if (val["trackid"].asInt()) {
+        tracks[val["trackid"].asInt()] = Track(val);
       }
-    }
+      return true;
+    });
     if (meta.isMember("moreheader")) {
       moreheader = meta["moreheader"].asInt();
     } else {

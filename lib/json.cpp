@@ -4,6 +4,7 @@
 #include "defines.h"
 #include <sstream>
 #include <fstream>
+#include <algorithm>
 #include <stdlib.h>
 #include <stdint.h> //for uint64_t
 #include <string.h> //for memcpy
@@ -137,9 +138,19 @@ static void skipToEnd(std::istream & fromstream) {
   }
 }
 
-/// Sets this JSON::Value to null;
+/// Sets this JSON::Value to null
 JSON::Value::Value() {
   null();
+}
+
+/// Sets this JSON::Value to null
+JSON::Value::~Value() {
+  null();
+}
+
+JSON::Value::Value(const Value & rhs) {
+  null();
+  *this = rhs;
 }
 
 /// Sets this JSON::Value to read from this position in the std::istream
@@ -271,6 +282,16 @@ JSON::Value::Value(long long int val) {
   intVal = val;
 }
 
+/// Sets this JSON::Value to the given integer.
+JSON::Value::Value(bool val) {
+  myType = BOOL;
+  if (val){
+    intVal = 1;
+  }else{
+    intVal = 0;
+  }
+}
+
 /// Compares a JSON::Value to another for equality.
 bool JSON::Value::operator==(const JSON::Value & rhs) const {
   if (myType != rhs.myType) return false;
@@ -285,26 +306,27 @@ bool JSON::Value::operator==(const JSON::Value & rhs) const {
   }
   if (myType == OBJECT) {
     if (objVal.size() != rhs.objVal.size()) return false;
-    for (std::map<std::string, Value>::const_iterator it = objVal.begin(); it != objVal.end(); ++it) {
-      if (!rhs.isMember(it->first)) {
+    bool ret = true;
+    forEachMember([&] (const std::string & name, const JSON::Value & val) -> bool {
+      if (!rhs.isMember(name) || val != *(rhs.objVal.find(name)->second)) {
+        ret = false;
         return false;
       }
-      if (it->second != rhs.objVal.find(it->first)->second) {
-        return false;
-      }
-    }
-    return true;
+      return true;
+    });
+    return ret;
   }
   if (myType == ARRAY) {
     if (arrVal.size() != rhs.arrVal.size()) return false;
-    int i = 0;
-    for (std::deque<Value>::const_iterator it = arrVal.begin(); it != arrVal.end(); ++it) {
-      if (*it != rhs.arrVal[i]) {
+    bool ret = true;
+    forEachIndice([&] (const unsigned int num, const JSON::Value & val) -> bool {
+      if (val != *(rhs.arrVal[num])) {
+        ret = false;
         return false;
       }
-      i++;
-    }
-    return true;
+      return true;
+    });
+    return ret;
   }
   return true;
 }
@@ -312,6 +334,31 @@ bool JSON::Value::operator==(const JSON::Value & rhs) const {
 /// Compares a JSON::Value to another for equality.
 bool JSON::Value::operator!=(const JSON::Value & rhs) const {
   return !((*this) == rhs);
+}
+
+/// Sets this JSON::Value to be equal to the given JSON::Value.
+JSON::Value & JSON::Value::operator=(const JSON::Value & rhs) {
+  null();
+  myType = rhs.myType;
+  if (myType == STRING){
+    strVal = rhs.strVal;
+  }
+  if (myType == BOOL || myType == INTEGER){
+    intVal = rhs.intVal;
+  }
+  if (myType == OBJECT){
+    rhs.forEachMember([&] (const std::string & name, const JSON::Value & val) -> bool {
+      (*this)[name] = val;
+      return true;
+    });
+  }
+  if (myType == ARRAY){
+    rhs.forEach([&] (const JSON::Value & val) -> bool {
+      append(val);
+      return true;
+    });
+  }
+  return *this;
 }
 
 /// Sets this JSON::Value to the given boolean.
@@ -445,7 +492,12 @@ JSON::Value & JSON::Value::operator[](const std::string i) {
     null();
     myType = OBJECT;
   }
-  return objVal[i];
+  Value * pntr = objVal[i];
+  if (!pntr){
+    objVal[i] = new JSON::Value();
+    pntr = objVal[i];
+  }
+  return *pntr;
 }
 
 /// Retrieves or sets the JSON::Value at this position in the object.
@@ -455,7 +507,12 @@ JSON::Value & JSON::Value::operator[](const char * i) {
     null();
     myType = OBJECT;
   }
-  return objVal[i];
+  Value * pntr = objVal[i];
+  if (!pntr){
+    objVal[i] = new JSON::Value();
+    pntr = objVal[i];
+  }
+  return *pntr;
 }
 
 /// Retrieves or sets the JSON::Value at this position in the array.
@@ -466,27 +523,27 @@ JSON::Value & JSON::Value::operator[](unsigned int i) {
     myType = ARRAY;
   }
   while (i >= arrVal.size()) {
-    append(JSON::Value());
+    append(new JSON::Value());
   }
-  return arrVal[i];
+  return *arrVal[i];
 }
 
 /// Retrieves the JSON::Value at this position in the object.
 /// Fails horribly if that values does not exist.
 const JSON::Value & JSON::Value::operator[](const std::string i) const {
-  return objVal.find(i)->second;
+  return *objVal.find(i)->second;
 }
 
 /// Retrieves the JSON::Value at this position in the object.
 /// Fails horribly if that values does not exist.
 const JSON::Value & JSON::Value::operator[](const char * i) const {
-  return objVal.find(i)->second;
+  return *objVal.find(i)->second;
 }
 
 /// Retrieves the JSON::Value at this position in the array.
 /// Fails horribly if that values does not exist.
 const JSON::Value & JSON::Value::operator[](unsigned int i) const {
-  return arrVal[i];
+  return *arrVal[i];
 }
 
 /// Packs to a std::string for transfer over the network.
@@ -516,25 +573,25 @@ std::string JSON::Value::toPacked() const {
   }
   if (isObject()) {
     r += 0xE0;
-    if (objVal.size() > 0) {
-      for (JSON::ObjConstIter it = objVal.begin(); it != objVal.end(); it++) {
-        if (it->first.size() > 0) {
-          r += it->first.size() / 256;
-          r += it->first.size() % 256;
-          r += it->first;
-          r += it->second.toPacked();
-        }
+    forEachMember([&] (const std::string & name, const JSON::Value & val) -> bool {
+      if (name.size() > 0) {
+        r += name.size() / 256;
+        r += name.size() % 256;
+        r += name;
+        r += val.toPacked();
       }
-    }
+      return true;
+    });
     r += (char)0x0;
     r += (char)0x0;
     r += (char)0xEE;
   }
   if (isArray()) {
     r += 0x0A;
-    for (JSON::ArrConstIter it = arrVal.begin(); it != arrVal.end(); it++) {
-      r += it->toPacked();
-    }
+    forEach([&] (const JSON::Value & val) -> bool {
+      r += val.toPacked();
+      return true;
+    });
     r += (char)0x0;
     r += (char)0x0;
     r += (char)0xEE;
@@ -563,16 +620,15 @@ void JSON::Value::sendTo(Socket::Connection & socket) const {
   }
   if (isObject()) {
     if (isMember("trackid") && isMember("time")) {
-      unsigned int trackid = objVal.find("trackid")->second.asInt();
-      long long time = objVal.find("time")->second.asInt();
+      unsigned int trackid = objVal.find("trackid")->second->asInt();
+      long long time = objVal.find("time")->second->asInt();
       unsigned int size = 16;
-      if (objVal.size() > 0) {
-        for (JSON::ObjConstIter it = objVal.begin(); it != objVal.end(); it++) {
-          if (it->first.size() > 0 && it->first != "trackid" && it->first != "time" && it->first != "datatype") {
-            size += 2 + it->first.size() + it->second.packedSize();
-          }
+      forEachMember([&] (const std::string & name, const JSON::Value & val) -> bool {
+        if (name.size() > 0 && name != "trackid" && name != "time" && name != "datatype") {
+          size += 2 + name.size() + val.packedSize();
         }
-      }
+        return true;
+      });
       socket.SendNow("DTP2", 4);
       size = htonl(size);
       socket.SendNow((char *)&size, 4);
@@ -583,18 +639,17 @@ void JSON::Value::sendTo(Socket::Connection & socket) const {
       tmpHalf = htonl((int)(time & 0xFFFFFFFF));
       socket.SendNow((char *)&tmpHalf, 4);
       socket.SendNow("\340", 1);
-      if (objVal.size() > 0) {
-        for (JSON::ObjConstIter it = objVal.begin(); it != objVal.end(); it++) {
-          if (it->first.size() > 0 && it->first != "trackid" && it->first != "time" && it->first != "datatype") {
-            char sizebuffer[2] = {0, 0};
-            sizebuffer[0] = (it->first.size() >> 8) & 0xFF;
-            sizebuffer[1] = it->first.size() & 0xFF;
-            socket.SendNow(sizebuffer, 2);
-            socket.SendNow(it->first);
-            it->second.sendTo(socket);
-          }
+      forEachMember([&] (const std::string & name, const JSON::Value & val) -> bool {
+        if (name.size() > 0 && name != "trackid" && name != "time" && name != "datatype") {
+          char sizebuffer[2] = {0, 0};
+          sizebuffer[0] = (name.size() >> 8) & 0xFF;
+          sizebuffer[1] = name.size() & 0xFF;
+          socket.SendNow(sizebuffer, 2);
+          socket.SendNow(name);
+          val.sendTo(socket);
         }
-      }
+        return true;
+      });
       socket.SendNow("\000\000\356", 3);
       return;
     }
@@ -604,26 +659,23 @@ void JSON::Value::sendTo(Socket::Connection & socket) const {
       socket.SendNow((char *)&size, 4);
     }
     socket.SendNow("\340", 1);
-    if (objVal.size() > 0) {
-      for (JSON::ObjConstIter it = objVal.begin(); it != objVal.end(); it++) {
-        if (it->first.size() > 0) {
-          char sizebuffer[2] = {0, 0};
-          sizebuffer[0] = (it->first.size() >> 8) & 0xFF;
-          sizebuffer[1] = it->first.size() & 0xFF;
-          socket.SendNow(sizebuffer, 2);
-          socket.SendNow(it->first);
-          it->second.sendTo(socket);
-        }
+    forEachMember([&] (const std::string & name, const JSON::Value & val) -> bool {
+      if (name.size() > 0 && name != "trackid" && name != "time" && name != "datatype") {
+        char sizebuffer[2] = {0, 0};
+        sizebuffer[0] = (name.size() >> 8) & 0xFF;
+        sizebuffer[1] = name.size() & 0xFF;
+        socket.SendNow(sizebuffer, 2);
+        socket.SendNow(name);
+        val.sendTo(socket);
       }
-    }
+      return true;
+    });
     socket.SendNow("\000\000\356", 3);
     return;
   }
   if (isArray()) {
     socket.SendNow("\012", 1);
-    for (JSON::ArrConstIter it = arrVal.begin(); it != arrVal.end(); it++) {
-      it->sendTo(socket);
-    }
+    forEach([&] (const JSON::Value & val) -> bool {val.sendTo(socket); return true;});
     socket.SendNow("\000\000\356", 3);
     return;
   }
@@ -639,20 +691,17 @@ unsigned int JSON::Value::packedSize() const {
   }
   if (isObject()) {
     unsigned int ret = 4;
-    if (objVal.size() > 0) {
-      for (JSON::ObjConstIter it = objVal.begin(); it != objVal.end(); it++) {
-        if (it->first.size() > 0) {
-          ret += 2 + it->first.size() + it->second.packedSize();
-        }
+    forEachMember([&] (const std::string & name, const JSON::Value & val) -> bool {
+      if (name.size() > 0) {
+        ret += 2 + name.size() + val.packedSize();
       }
-    }
+      return true;
+    });
     return ret;
   }
   if (isArray()) {
     unsigned int ret = 4;
-    for (JSON::ArrConstIter it = arrVal.begin(); it != arrVal.end(); it++) {
-      ret += it->packedSize();
-    }
+    forEach([&] (const JSON::Value & val) -> bool {ret += val.packedSize(); return true;});
     return ret;
   }
   return 0;
@@ -669,20 +718,25 @@ void JSON::Value::netPrepare() {
   std::string packed = toPacked();
   //insert proper header for this type of data
   int packID = -1;
-  long long unsigned int time = objVal["time"].asInt();
-  std::string dataType;
+  long long unsigned int time = 0;
+  if (isMember("time")){
+    time = objVal["time"]->asInt();
+  }
   if (isMember("datatype") || isMember("trackid")) {
-    dataType = objVal["datatype"].asString();
     if (isMember("trackid")) {
-      packID = objVal["trackid"].asInt();
+      packID = objVal["trackid"]->asInt();
     } else {
-      if (objVal["datatype"].asString() == "video") {
+      std::string dataType;
+      if (isMember("datatype")) {
+        dataType = objVal["datatype"]->asStringRef();
+      }
+      if (dataType == "video") {
         packID = 1;
       }
-      if (objVal["datatype"].asString() == "audio") {
+      if (dataType == "audio") {
         packID = 2;
       }
-      if (objVal["datatype"].asString() == "meta") {
+      if (dataType == "meta") {
         packID = 3;
       }
       //endmark and the likes...
@@ -691,14 +745,13 @@ void JSON::Value::netPrepare() {
       }
     }
     removeMember("time");
-    if (packID != 0) {
+    if (packID) {
       removeMember("datatype");
     }
     removeMember("trackid");
     packed = toPacked();
-    objVal["time"] = (long long int)time;
-    objVal["datatype"] = dataType;
-    objVal["trackid"] = packID;
+    (*this)["time"] = (long long int)time;
+    (*this)["trackid"] = packID;
     strVal.resize(packed.size() + 20);
     memcpy((void *)strVal.c_str(), "DTP2", 4);
   } else {
@@ -762,31 +815,27 @@ std::string JSON::Value::toString() const {
       }
     case ARRAY: {
         std::string tmp = "[";
-        if (arrVal.size() > 0) {
-          for (ArrConstIter it = ArrBegin(); it != ArrEnd(); it++) {
-            tmp += it->toString();
-            if (it + 1 != ArrEnd()) {
-              tmp += ",";
-            }
+        forEachIndice([&] (const unsigned int num, const JSON::Value & val) -> bool {
+          tmp += val.toString();
+          if (num != arrVal.size() - 1){
+            tmp += ",";
           }
-        }
+          return true;
+        });
         tmp += "]";
         return tmp;
         break;
       }
     case OBJECT: {
         std::string tmp2 = "{";
-        if (objVal.size() > 0) {
-          ObjConstIter it3 = ObjEnd();
-          --it3;
-          for (ObjConstIter it2 = ObjBegin(); it2 != ObjEnd(); it2++) {
-            tmp2 += string_escape(it2->first) + ":";
-            tmp2 += it2->second.toString();
-            if (it2 != it3) {
-              tmp2 += ",";
-            }
+        forEachMember([&] (const std::string & name, const JSON::Value & val) -> bool {
+          tmp2 += string_escape(name) + ":";
+          tmp2 += val.toString();
+          if (name != objVal.rbegin()->first) {
+            tmp2 += ",";
           }
-        }
+          return true;
+        });
         tmp2 += "}";
         return tmp2;
         break;
@@ -820,12 +869,13 @@ std::string JSON::Value::toPrettyString(int indentation) const {
     case ARRAY: {
         if (arrVal.size() > 0) {
           std::string tmp = "[\n" + std::string(indentation + 2, ' ');
-          for (ArrConstIter it = ArrBegin(); it != ArrEnd(); it++) {
-            tmp += it->toPrettyString(indentation + 2);
-            if (it + 1 != ArrEnd()) {
+          forEachIndice([&] (const unsigned int num, const JSON::Value & val) -> bool {
+            tmp += val.toPrettyString(indentation + 2);
+            if (num != arrVal.size() - 1){
               tmp += ", ";
             }
-          }
+            return true;
+          });
           tmp += "\n" + std::string(indentation, ' ') + "]";
           return tmp;
         } else {
@@ -840,15 +890,14 @@ std::string JSON::Value::toPrettyString(int indentation) const {
             shortMode = true;
           }
           std::string tmp2 = "{" + std::string((shortMode ? "" : "\n"));
-          ObjConstIter it3 = ObjEnd();
-          --it3;
-          for (ObjConstIter it2 = ObjBegin(); it2 != ObjEnd(); it2++) {
-            tmp2 += (shortMode ? std::string("") : std::string(indentation + 2, ' ')) + string_escape(it2->first) + ":";
-            tmp2 += it2->second.toPrettyString(indentation + 2);
-            if (it2 != it3) {
+          forEachMember([&] (const std::string & name, const JSON::Value & val) -> bool {
+            tmp2 += (shortMode ? std::string("") : std::string(indentation + 2, ' ')) + string_escape(name) + ":";
+            tmp2 += val.toPrettyString(indentation + 2);
+            if (name != objVal.rbegin()->first) {
               tmp2 += "," + std::string((shortMode ? " " : "\n"));
             }
-          }
+            return true;
+          });
           tmp2 += (shortMode ? std::string("") : "\n" + std::string(indentation, ' ')) + "}";
           return tmp2;
         } else {
@@ -870,7 +919,7 @@ void JSON::Value::append(const JSON::Value & rhs) {
     null();
     myType = ARRAY;
   }
-  arrVal.push_back(rhs);
+  arrVal.push_back(new JSON::Value(rhs));
 }
 
 /// Prepends the given value to the beginning of this JSON::Value array.
@@ -880,7 +929,7 @@ void JSON::Value::prepend(const JSON::Value & rhs) {
     null();
     myType = ARRAY;
   }
-  arrVal.push_front(rhs);
+  arrVal.push_front(new JSON::Value(rhs));
 }
 
 /// For array and object JSON::Value objects, reduces them
@@ -890,24 +939,23 @@ void JSON::Value::prepend(const JSON::Value & rhs) {
 /// do anything if the size is already lower or equal to the
 /// given size.
 void JSON::Value::shrink(unsigned int size) {
-  if (myType == ARRAY) {
-    while (arrVal.size() > size) {
-      arrVal.pop_front();
-    }
-    return;
+  while (arrVal.size() > size) {
+    delete arrVal.front();
+    arrVal.pop_front();
   }
-  if (myType == OBJECT) {
-    while (objVal.size() > size) {
-      objVal.erase(objVal.begin());
-    }
-    return;
+  while (objVal.size() > size) {
+    delete objVal.begin()->second;
+    objVal.erase(objVal.begin());
   }
 }
 
 /// For object JSON::Value objects, removes the member with
 /// the given name, if it exists. Has no effect otherwise.
 void JSON::Value::removeMember(const std::string & name) {
-  objVal.erase(name);
+  if (objVal.count(name)){
+    delete objVal[name];
+    objVal.erase(name);
+  }
 }
 
 /// For object JSON::Value objects, returns true if the
@@ -946,46 +994,6 @@ bool JSON::Value::isNull() const {
   return (myType == EMPTY);
 }
 
-/// Returns an iterator to the begin of the object map, if any.
-JSON::ObjIter JSON::Value::ObjBegin() {
-  return objVal.begin();
-}
-
-/// Returns an iterator to the end of the object map, if any.
-JSON::ObjIter JSON::Value::ObjEnd() {
-  return objVal.end();
-}
-
-/// Returns an iterator to the begin of the array, if any.
-JSON::ArrIter JSON::Value::ArrBegin() {
-  return arrVal.begin();
-}
-
-/// Returns an iterator to the end of the array, if any.
-JSON::ArrIter JSON::Value::ArrEnd() {
-  return arrVal.end();
-}
-
-/// Returns an iterator to the begin of the object map, if any.
-JSON::ObjConstIter JSON::Value::ObjBegin() const {
-  return objVal.begin();
-}
-
-/// Returns an iterator to the end of the object map, if any.
-JSON::ObjConstIter JSON::Value::ObjEnd() const {
-  return objVal.end();
-}
-
-/// Returns an iterator to the begin of the array, if any.
-JSON::ArrConstIter JSON::Value::ArrBegin() const {
-  return arrVal.begin();
-}
-
-/// Returns an iterator to the end of the array, if any.
-JSON::ArrConstIter JSON::Value::ArrEnd() const {
-  return arrVal.end();
-}
-
 /// Returns the total of the objects and array size combined.
 unsigned int JSON::Value::size() const {
   return objVal.size() + arrVal.size();
@@ -994,11 +1002,84 @@ unsigned int JSON::Value::size() const {
 /// Completely clears the contents of this value,
 /// changing its type to NULL in the process.
 void JSON::Value::null() {
-  objVal.clear();
-  arrVal.clear();
+  shrink(0);
   strVal.clear();
   intVal = 0;
   myType = EMPTY;
+}
+
+//Iterates over all members or indices of this object or array, calling func for each.
+//Does nothing if not an object or array.
+void JSON::Value::forEach(std::function<bool (const Value&)> func) const{
+  if (myType == OBJECT){
+    if (objVal.size() == 0){return;}
+    std::for_each(objVal.cbegin(), objVal.cend(), [&](const std::pair<std::string, Value *> v){func(*(v.second));});
+  }
+  if (myType == ARRAY){
+    if (arrVal.size() == 0){return;}
+    std::for_each(arrVal.cbegin(), arrVal.cend(), [&](const Value * v){func(*v);});
+  }
+}
+
+//Iterates over all members or indices of this object or array, calling func for each.
+//Does nothing if not an object or array.
+void JSON::Value::forEach(std::function<bool (Value&)> func){
+  if (myType == OBJECT){
+    if (objVal.size() == 0){return;}
+    std::for_each(objVal.begin(), objVal.end(), [&](std::pair<std::string, Value *> v){func(*(v.second));});
+  }
+  if (myType == ARRAY){
+    if (arrVal.size() == 0){return;}
+    std::for_each(arrVal.begin(), arrVal.end(), [&](Value * v){func(*v);});
+  }
+}
+
+//Iterates over all members of this object, calling func for each.
+//Does nothing if not an object.
+void JSON::Value::forEachMember(std::function<bool (const std::string&, const Value&)> func) const{
+  if (objVal.size() == 0){return;}
+  for (auto it = objVal.cbegin(); it != objVal.cend(); ++it){
+    if (!func(it->first, *(it->second))){
+      return;
+    }
+  }
+}
+
+//Iterates over all members of this object, calling func for each.
+//Does nothing if not an object.
+void JSON::Value::forEachMember(std::function<bool (const std::string&, Value&)> func){
+  if (objVal.size() == 0){return;}
+  for (auto it = objVal.begin(); it != objVal.end(); ++it){
+    if (!func(it->first, *(it->second))){
+      return;
+    }
+  }
+}
+
+//Iterates over all indices of this array, calling func for each.
+//Does nothing if not an array.
+void JSON::Value::forEachIndice(std::function<bool (const unsigned int, const Value&)> func) const{
+  if (arrVal.size() == 0){return;}
+  unsigned int i = 0;
+  for (auto it = arrVal.cbegin(); it != arrVal.cend(); ++it){
+    if (!func(i, **it)){
+      return;
+    }
+    ++i;
+  }
+}
+
+//Iterates over all indices of this array, calling func for each.
+//Does nothing if not an array.
+void JSON::Value::forEachIndice(std::function<bool (const unsigned int, Value&)> func){
+  if (arrVal.size() == 0){return;}
+  unsigned int i = 0;
+  for (auto it = arrVal.begin(); it != arrVal.end(); ++it){
+    if (!func(i, **it)){
+      return;
+    }
+    ++i;
+  }
 }
 
 /// Converts a std::string to a JSON::Value.
@@ -1093,8 +1174,9 @@ void JSON::fromDTMI(const unsigned char * data, unsigned int len, unsigned int &
     case 0x0A: { //array
         ++i;
         while (data[i] + data[i + 1] != 0 && i < len) { //while not encountering 0x0000 (we assume 0x0000EE)
-          ret.append(JSON::Value());
-          fromDTMI(data, len, i, *--ret.ArrEnd()); //add content, recursively parsed, updating i
+          JSON::Value tval;
+          fromDTMI(data, len, i, tval); //add content, recursively parsed, updating i
+          ret.append(tval);
         }
         i += 3; //skip 0x0000EE
         return;

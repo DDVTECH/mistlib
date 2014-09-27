@@ -6,6 +6,7 @@
 #include <map>
 #include <istream>
 #include <vector>
+#include <functional>
 #include "socket.h"
 
 //empty definition of DTSC::Stream so it can be a friend.
@@ -21,27 +22,21 @@ namespace JSON {
     EMPTY, BOOL, INTEGER, STRING, ARRAY, OBJECT
   };
 
-  class Value;
-  //forward declaration for below typedef
-
-  typedef std::map<std::string, Value>::iterator ObjIter;
-  typedef std::deque<Value>::iterator ArrIter;
-  typedef std::map<std::string, Value>::const_iterator ObjConstIter;
-  typedef std::deque<Value>::const_iterator ArrConstIter;
-
   /// A JSON::Value is either a string or an integer, but may also be an object, array or null.
   class Value {
     private:
       ValueType myType;
       long long int intVal;
       std::string strVal;
-      std::deque<Value> arrVal;
-      std::map<std::string, Value> objVal;
+      std::deque<Value*> arrVal;
+      std::map<std::string, Value*> objVal;
     public:
       //friends
       friend class DTSC::Stream; //for access to strVal
-      //constructors
+      //constructors/destructors
       Value();
+      ~Value();
+      Value(const Value & rhs);
       Value(std::istream & fromstream);
       Value(const std::string & val);
       Value(const char * val);
@@ -51,6 +46,7 @@ namespace JSON {
       bool operator==(const Value & rhs) const;
       bool operator!=(const Value & rhs) const;
       //assignment operators
+      Value & operator=(const Value & rhs);
       Value & operator=(const std::string & rhs);
       Value & operator=(const char * rhs);
       Value & operator=(const long long int & rhs);
@@ -92,16 +88,14 @@ namespace JSON {
       bool isObject() const;
       bool isArray() const;
       bool isNull() const;
-      ObjIter ObjBegin();
-      ObjIter ObjEnd();
-      ArrIter ArrBegin();
-      ArrIter ArrEnd();
-      ObjConstIter ObjBegin() const;
-      ObjConstIter ObjEnd() const;
-      ArrConstIter ArrBegin() const;
-      ArrConstIter ArrEnd() const;
       unsigned int size() const;
       void null();
+      void forEach(std::function<bool (const Value&)> func) const;
+      void forEach(std::function<bool (Value&)> func);
+      void forEachMember(std::function<bool (const std::string&, const Value&)> func) const;
+      void forEachMember(std::function<bool (const std::string&, Value&)> func);
+      void forEachIndice(std::function<bool (const unsigned int, const Value&)> func) const;
+      void forEachIndice(std::function<bool (const unsigned int, Value&)> func);
   };
 
   Value fromDTMI2(std::string & data);

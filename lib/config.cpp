@@ -91,49 +91,51 @@ void Util::Config::addOption(std::string optname, JSON::Value option) {
     vals[optname].removeMember("default");
   }
   long_count = 0;
-  for (JSON::ObjIter it = vals.ObjBegin(); it != vals.ObjEnd(); it++) {
-    if (it->second.isMember("long")) {
+  vals.forEachMember([&] (const std::string & name, const JSON::Value & val) -> bool {
+    if (val.isMember("long")) {
       long_count++;
     }
-    if (it->second.isMember("long_off")) {
+    if (val.isMember("long_off")) {
       long_count++;
     }
-  }
+    return true;
+  });
 }
 
 /// Prints a usage message to the given output.
 void Util::Config::printHelp(std::ostream & output) {
   unsigned int longest = 0;
   std::map<long long int, std::string> args;
-  for (JSON::ObjIter it = vals.ObjBegin(); it != vals.ObjEnd(); it++) {
+  vals.forEachMember([&] (const std::string & name, const JSON::Value & val) -> bool {
     unsigned int current = 0;
-    if (it->second.isMember("long")) {
-      current += it->second["long"].asString().size() + 4;
+    if (val.isMember("long")) {
+      current += val["long"].asString().size() + 4;
     }
-    if (it->second.isMember("short")) {
-      current += it->second["short"].asString().size() + 3;
+    if (val.isMember("short")) {
+      current += val["short"].asString().size() + 3;
     }
     if (current > longest) {
       longest = current;
     }
     current = 0;
-    if (it->second.isMember("long_off")) {
-      current += it->second["long_off"].asString().size() + 4;
+    if (val.isMember("long_off")) {
+      current += val["long_off"].asString().size() + 4;
     }
-    if (it->second.isMember("short_off")) {
-      current += it->second["short_off"].asString().size() + 3;
+    if (val.isMember("short_off")) {
+      current += val["short_off"].asString().size() + 3;
     }
     if (current > longest) {
       longest = current;
     }
-    if (it->second.isMember("arg_num")) {
-      current = it->first.size() + 3;
+    if (val.isMember("arg_num")) {
+      current = name.size() + 3;
       if (current > longest) {
         longest = current;
       }
-      args[it->second["arg_num"].asInt()] = it->first;
+      args[val["arg_num"].asInt()] = name;
     }
-  }
+    return true;
+  });
   output << "Usage: " << getString("cmd") << " [options]";
   for (std::map<long long int, std::string>::iterator i = args.begin(); i != args.end(); i++) {
     if (vals[i->second].isMember("value") && vals[i->second]["value"].size()) {
@@ -143,56 +145,57 @@ void Util::Config::printHelp(std::ostream & output) {
     }
   }
   output << std::endl << std::endl;
-  for (JSON::ObjIter it = vals.ObjBegin(); it != vals.ObjEnd(); it++) {
+  vals.forEachMember([&] (const std::string & name, const JSON::Value & val) -> bool {
     std::string f;
-    if (it->second.isMember("long") || it->second.isMember("short")) {
-      if (it->second.isMember("long") && it->second.isMember("short")) {
-        f = "--" + it->second["long"].asString() + ", -" + it->second["short"].asString();
+    if (val.isMember("long") || val.isMember("short")) {
+      if (val.isMember("long") && val.isMember("short")) {
+        f = "--" + val["long"].asString() + ", -" + val["short"].asString();
       } else {
-        if (it->second.isMember("long")) {
-          f = "--" + it->second["long"].asString();
+        if (val.isMember("long")) {
+          f = "--" + val["long"].asString();
         }
-        if (it->second.isMember("short")) {
-          f = "-" + it->second["short"].asString();
-        }
-      }
-      while (f.size() < longest) {
-        f.append(" ");
-      }
-      if (it->second.isMember("arg")) {
-        output << f << "(" << it->second["arg"].asString() << ") " << it->second["help"].asString() << std::endl;
-      } else {
-        output << f << it->second["help"].asString() << std::endl;
-      }
-    }
-    if (it->second.isMember("long_off") || it->second.isMember("short_off")) {
-      if (it->second.isMember("long_off") && it->second.isMember("short_off")) {
-        f = "--" + it->second["long_off"].asString() + ", -" + it->second["short_off"].asString();
-      } else {
-        if (it->second.isMember("long_off")) {
-          f = "--" + it->second["long_off"].asString();
-        }
-        if (it->second.isMember("short_off")) {
-          f = "-" + it->second["short_off"].asString();
+        if (val.isMember("short")) {
+          f = "-" + val["short"].asString();
         }
       }
       while (f.size() < longest) {
         f.append(" ");
       }
-      if (it->second.isMember("arg")) {
-        output << f << "(" << it->second["arg"].asString() << ") " << it->second["help"].asString() << std::endl;
+      if (val.isMember("arg")) {
+        output << f << "(" << val["arg"].asString() << ") " << val["help"].asString() << std::endl;
       } else {
-        output << f << it->second["help"].asString() << std::endl;
+        output << f << val["help"].asString() << std::endl;
       }
     }
-    if (it->second.isMember("arg_num")) {
-      f = it->first;
+    if (val.isMember("long_off") || val.isMember("short_off")) {
+      if (val.isMember("long_off") && val.isMember("short_off")) {
+        f = "--" + val["long_off"].asString() + ", -" + val["short_off"].asString();
+      } else {
+        if (val.isMember("long_off")) {
+          f = "--" + val["long_off"].asString();
+        }
+        if (val.isMember("short_off")) {
+          f = "-" + val["short_off"].asString();
+        }
+      }
       while (f.size() < longest) {
         f.append(" ");
       }
-      output << f << "(" << it->second["arg"].asString() << ") " << it->second["help"].asString() << std::endl;
+      if (val.isMember("arg")) {
+        output << f << "(" << val["arg"].asString() << ") " << val["help"].asString() << std::endl;
+      } else {
+        output << f << val["help"].asString() << std::endl;
+      }
     }
-  }
+    if (val.isMember("arg_num")) {
+      f = name;
+      while (f.size() < longest) {
+        f.append(" ");
+      }
+      output << f << "(" << val["arg"].asString() << ") " << val["help"].asString() << std::endl;
+    }
+    return true;
+  });
 }
 
 /// Parses commandline arguments.
@@ -203,43 +206,42 @@ bool Util::Config::parseArgs(int & argc, char ** & argv) {
   struct option * longOpts = (struct option *)calloc(long_count + 1, sizeof(struct option));
   int long_i = 0;
   int arg_count = 0;
-  if (vals.size()) {
-    for (JSON::ObjIter it = vals.ObjBegin(); it != vals.ObjEnd(); it++) {
-      if (it->second.isMember("short")) {
-        shortopts += it->second["short"].asString();
-        if (it->second.isMember("arg")) {
-          shortopts += ":";
-        }
-      }
-      if (it->second.isMember("short_off")) {
-        shortopts += it->second["short_off"].asString();
-        if (it->second.isMember("arg")) {
-          shortopts += ":";
-        }
-      }
-      if (it->second.isMember("long")) {
-        longOpts[long_i].name = it->second["long"].asString().c_str();
-        longOpts[long_i].val = it->second["short"].asString()[0];
-        if (it->second.isMember("arg")) {
-          longOpts[long_i].has_arg = 1;
-        }
-        long_i++;
-      }
-      if (it->second.isMember("long_off")) {
-        longOpts[long_i].name = it->second["long_off"].asString().c_str();
-        longOpts[long_i].val = it->second["short_off"].asString()[0];
-        if (it->second.isMember("arg")) {
-          longOpts[long_i].has_arg = 1;
-        }
-        long_i++;
-      }
-      if (it->second.isMember("arg_num") && !(it->second.isMember("value") && it->second["value"].size())) {
-        if (it->second["arg_num"].asInt() > arg_count) {
-          arg_count = it->second["arg_num"].asInt();
-        }
+  vals.forEachMember([&] (const std::string & name, const JSON::Value & val) -> bool {
+    if (val.isMember("short")) {
+      shortopts += val["short"].asStringRef();
+      if (val.isMember("arg")) {
+        shortopts += ":";
       }
     }
-  }
+    if (val.isMember("short_off")) {
+      shortopts += val["short_off"].asStringRef();
+      if (val.isMember("arg")) {
+        shortopts += ":";
+      }
+    }
+    if (val.isMember("long")) {
+      longOpts[long_i].name = val["long"].asStringRef().c_str();
+      longOpts[long_i].val = val["short"].asStringRef()[0];
+      if (val.isMember("arg")) {
+        longOpts[long_i].has_arg = 1;
+      }
+      long_i++;
+    }
+    if (val.isMember("long_off")) {
+      longOpts[long_i].name = val["long_off"].asStringRef().c_str();
+      longOpts[long_i].val = val["short_off"].asStringRef()[0];
+      if (val.isMember("arg")) {
+        longOpts[long_i].has_arg = 1;
+      }
+      long_i++;
+    }
+    if (val.isMember("arg_num") && !(val.isMember("value") && val["value"].size())) {
+      if (val["arg_num"].asInt() > arg_count) {
+        arg_count = val["arg_num"].asInt();
+      }
+    }
+    return true;
+  });
   while ((opt = getopt_long(argc, argv, shortopts.c_str(), longOpts, 0)) != -1) {
     switch (opt) {
       case 'h':
@@ -251,31 +253,34 @@ bool Util::Config::parseArgs(int & argc, char ** & argv) {
         exit(1);
         break;
       default:
-        for (JSON::ObjIter it = vals.ObjBegin(); it != vals.ObjEnd(); it++) {
-          if (it->second.isMember("short") && it->second["short"].asString()[0] == opt) {
-            if (it->second.isMember("arg")) {
-              it->second["value"].append((std::string)optarg);
+        vals.forEachMember([&] (const std::string & name, JSON::Value & val) -> bool {
+          if (val.isMember("short") && val["short"].asString()[0] == opt) {
+            if (val.isMember("arg")) {
+              val["value"].append((std::string)optarg);
             } else {
-              it->second["value"].append((long long int)1);
+              val["value"].append((long long int)1);
             }
-            break;
+            return false;
           }
-          if (it->second.isMember("short_off") && it->second["short_off"].asString()[0] == opt) {
-            it->second["value"].append((long long int)0);
+          if (val.isMember("short_off") && val["short_off"].asString()[0] == opt) {
+            val["value"].append((long long int)0);
+            return false;
           }
-        }
+          return true;
+        });
         break;
     }
   } //commandline options parser
   free(longOpts); //free the long options array
   long_i = 1; //re-use long_i as an argument counter
   while (optind < argc) { //parse all remaining options, ignoring anything unexpected.
-    for (JSON::ObjIter it = vals.ObjBegin(); it != vals.ObjEnd(); it++) {
-      if (it->second.isMember("arg_num") && it->second["arg_num"].asInt() == long_i) {
-        it->second["value"].append((std::string)argv[optind]);
-        break;
+    vals.forEachMember([&] (const std::string & name, JSON::Value & val) -> bool {
+      if (val.isMember("arg_num") && val["arg_num"].asInt() == long_i) {
+        val["value"].append((std::string)argv[optind]);
+        return false;
       }
-    }
+      return true;
+    });
     optind++;
     long_i++;
   }
@@ -511,7 +516,7 @@ void Util::Config::addBasicConnectorOptions(JSON::Value & capabilities) {
   option["long"] = "username";
   option["short"] = "u";
   option["arg"] = "string";
-  option["help"] = "Username to drop privileges to, or root to not drop provileges.";
+  option["help"] = "Username to drop privileges to, or root to not drop privileges.";
   option["value"].append("root");
   addOption("username", option);
   capabilities["optional"]["username"]["name"] = "Username";

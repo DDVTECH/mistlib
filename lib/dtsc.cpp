@@ -1090,15 +1090,15 @@ bool DTSC::isFixed(JSON::Value & metadata) {
   if (!metadata.isMember("tracks")) {
     return false;
   }
-  for (JSON::ObjIter it = metadata["tracks"].ObjBegin(); it != metadata["tracks"].ObjEnd(); it++) {
-    if (it->second["type"].asString() == "meta") {
-      continue;
+  metadata["tracks"].forEachMember([&] (const std::string & name, const JSON::Value & val) -> bool {
+    if (val["type"].asString() == "meta") {
+      return true;
     }
-    if (!it->second["keys"].isString()) {
+    if (!val["keys"].isString()) {
       return false;
     }
     //Check for bpos: last element bpos != 0
-    std::string keyRef = it->second["keys"].asStringRef();
+    std::string keyRef = val["keys"].asStringRef();
     if (keyRef.size() < 16) {
       return false;
     }
@@ -1106,6 +1106,7 @@ bool DTSC::isFixed(JSON::Value & metadata) {
     if (!(keyRef[offset] | keyRef[offset + 1] | keyRef[offset + 2] | keyRef[offset + 3] | keyRef[offset + 4])) {
       return false;
     }
-  }
+    return true;
+  });
   return true;
 }
